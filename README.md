@@ -63,22 +63,26 @@ Risk registor not done yet
 # Testing
 
 Run:
+
 `python excel_to_yaml.py Example.xlsx Example_Overview.yaml Example_Colours.yaml`
+
 `python GANTT_yaml.py Example_Overview.yaml out.svg --colours Example_Colours.yaml`
+
 `python FlowDiagram_yaml.py Example_Overview.yaml out.svg --colours Example_Colours.yaml`
 
 and to just focus on one patner
+
 `python FlowDiagram_yaml.py Example_Overview.yaml out.svg --colours Example_Colours.yaml LLC`
+
 
 ### Defaults
 
 if the excel is called `Overview.xlsx` then you can just run.
-`python excel_to_yaml.py`
-`python GANTT_yaml.py`
+`python excel_to_yaml.py` then
+`python GANTT_yaml.py` and
 `python FlowDiagram_yaml.py`
-
-and to just focus on one patner
-`python FlowDiagram_yaml.py LLC`
+or to just focus on one patner
+`python FlowDiagram_yaml.py LLC`.
 
 ## Workflow
 
