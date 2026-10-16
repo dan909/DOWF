@@ -41,6 +41,45 @@ Workbook containing:
 | D2.3 | D2.6a |
 
 
+### Sheet: Partners
+
+| Partner | NodeColour | ClusterColour | Contact | Email | Phone | Address |
+|------|--------|----------|-------|-----|--------|--------|
+| LPD | #502DE3 | #BEB1F5 |  |  |  |  |
+| LLC | #2FBF92 | #A0E8D2 |  |  |  |  |
+
+### Sheet: Statuses
+
+| Status | BorderColour | Action |
+|------|--------|----------|
+| Ongoing | #DC2626 | |
+
+
+
+### Sheet: Risks
+
+Risk registor not done yet
+
+# Testing
+
+Run:
+`python excel_to_yaml.py Example.xlsx Example_Overview.yaml Example_Colours.yaml`
+`python GANTT_yaml.py Example_Overview.yaml out.svg --colours Example_Colours.yaml`
+`python FlowDiagram_yaml.py Example_Overview.yaml out.svg --colours Example_Colours.yaml`
+
+and to just focus on one patner
+`python FlowDiagram_yaml.py Example_Overview.yaml out.svg --colours Example_Colours.yaml LLC`
+
+### Defaults
+
+if the excel is called `Overview.xlsx` then you can just run.
+`python excel_to_yaml.py`
+`python GANTT_yaml.py`
+`python FlowDiagram_yaml.py`
+
+and to just focus on one patner
+`python FlowDiagram_yaml.py LLC`
+
 ## Workflow
 
 Overview.xlsx
