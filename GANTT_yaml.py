@@ -7,10 +7,13 @@ Basic Gantt chart from Overview.yaml.
 * One row per deliverable (bar from `start` to `due`) or milestone (diamond at `due`),
   grouped under a coloured band per work package.
 * Bar colour = first lead; several leads = lighter shade of the first lead.
+* Optional critical path (--critical): the chain of linked items that drives each final
+  milestone, highlighted with connector arrows.
 * Optional: status border, progress fill (`progress: 0-100`), today line, year lines.
 * Writes an SVG (opens in any browser, imports into Word/PowerPoint/Inkscape).
 
 Usage:  python GANTT_yaml.py [Overview.yaml] [output.svg] [LEAD] [--colours Colours.yaml]
+                        [--critical] [--critical-end ID ...]
 Needs:  PyYAML only.
 """
 
@@ -20,6 +23,7 @@ import os
 import re
 import sys
 import textwrap
+from collections import defaultdict
 from datetime import date
 from xml.sax.saxutils import escape
 
@@ -36,6 +40,10 @@ parser.add_argument("yaml", nargs="?", default="Overview.yaml", help="project YA
 parser.add_argument("output", nargs="?", default="gantt.svg", help="output SVG (default: gantt.svg)")
 parser.add_argument("lead", nargs="?", default=None, help="show only items involving this partner")
 parser.add_argument("--colours", metavar="FILE", help="colour file (default: Colours.yaml, see Palette.py)")
+parser.add_argument("--critical", action="store_true",
+                    help="highlight the critical path to each final milestone")
+parser.add_argument("--critical-end", metavar="ID", action="append",
+                    help="trace the critical path back from this item only (repeatable; implies --critical)")
 args = parser.parse_args()
 
 YAML_FILE = args.yaml
@@ -43,9 +51,13 @@ OUT_FILE = args.output
 FILTER_LEAD = args.lead          # e.g. "LLC"; None = show everything
 FILTER_KEEP_MILESTONES = False
 
+SHOW_CRITICAL_PATH = args.critical or bool(args.critical_end)    # or set True here
+CRITICAL_ENDS = args.critical_end or None   # e.g. ["M3"]; None = every final milestone
+
 # Colours come from Colours.yaml (see Palette.py): partners, status borders, milestone colour.
 palette = Palette(find_config(args.colours, [os.path.dirname(os.path.abspath(YAML_FILE))]))
 MILESTONE_COLOUR = palette.milestone
+CRITICAL_COLOUR = palette.critical
 STATUS_COLOURS = palette.statuses
 JOINT_TINT = 0.60
 
@@ -93,6 +105,56 @@ def month_index(d):
     return d.year * 12 + (d.month - 1) + (d.day - 1) / dim
 
 
+def find_critical_paths(items, deps, ends=None):
+    """Trace the driving chain back from each final item.
+
+    Only links that run forward in time are used (a link whose source is due AFTER its target
+    is a start-to-start / "ongoing" relationship and is reported as skipped).  Walking back from
+    an end item, the predecessor that drives each step is the one that finishes closest to
+    (or overlapping) the start of the next item; ties go to the one finishing latest.
+    Returns (paths, skipped); each path is a list of ids in time order.
+    """
+    preds, succs, skipped = defaultdict(list), defaultdict(list), []
+    for a, b in deps:
+        if a not in items or b not in items or a == b:
+            continue
+        if items[a]["due"] > items[b]["due"]:
+            skipped.append((a, b))
+            continue
+        preds[b].append(a)
+        succs[a].append(b)
+
+    if ends:
+        end_ids = []
+        for e in ends:
+            if e in items:
+                end_ids.append(e)
+            else:
+                print(f"WARNING: --critical-end '{e}' is not an item id")
+    else:
+        sinks = [i for i in items if preds[i] and not succs[i]]
+        end_ids = [i for i in sinks if items[i]["kind"] == "milestone"] or sinks
+
+    paths = []
+    for e in end_ids:
+        chain, cur, seen = [e], e, {e}
+        while preds[cur]:
+            def gap(p, cur=cur):
+                return max(0, (items[cur]["start"] - items[p]["due"]).days)
+            best = min(preds[cur], key=lambda p: (gap(p), -items[p]["due"].toordinal(),
+                                                  items[p]["start"].toordinal(), p))
+            if best in seen:
+                break
+            chain.append(best)
+            seen.add(best)
+            cur = best
+        if len(chain) > 1:
+            paths.append(chain[::-1])
+        else:
+            print(f"NOTE: {e} has no forward dependencies leading to it - no critical path drawn for it")
+    return paths, skipped
+
+
 # --------------------------------------------------------------------------
 # Load
 # --------------------------------------------------------------------------
@@ -126,6 +188,22 @@ for wp_id, wp in data["work_packages"].items():
             })
     wps[wp_id] = {"title": wp["title"], "lead": wp["lead"], "items": items}
 
+critical_paths = []
+if SHOW_CRITICAL_PATH:
+    all_items = {i["id"]: i for wp in wps.values() for i in wp["items"]}
+    deps = [(d["from"], d["to"]) for d in (data.get("dependencies") or [])]
+    critical_paths, skipped_links = find_critical_paths(all_items, deps, CRITICAL_ENDS)
+    if skipped_links:
+        shown = ", ".join(f"{a}->{b}" for a, b in skipped_links[:6])
+        more = f" and {len(skipped_links) - 6} more" if len(skipped_links) > 6 else ""
+        print(f"NOTE: {len(skipped_links)} link(s) ignored for the critical path because the source "
+              f"is due after the target (ongoing / start-to-start?): {shown}{more}")
+    for path in critical_paths:
+        gaps = [max(0, (all_items[b]["start"] - all_items[a]["due"]).days) for a, b in zip(path, path[1:])]
+        print(f"Critical path: {' -> '.join(path)}   (gaps between steps, days: {', '.join(map(str, gaps))})")
+    if not critical_paths:
+        print("NOTE: no critical path found - check the `dependencies:` section of the YAML")
+
 if FILTER_LEAD:
     want = FILTER_LEAD.strip().lower()
     for wp in wps.values():
@@ -139,6 +217,14 @@ if FILTER_LEAD:
 used_names = [l for wp in wps.values() for i in wp["items"] for l in i["leads"]] + \
              [l for wp in wps.values() for l in leads(wp["lead"])]
 legend_partners = palette.legend_partners(used_names)   # also auto-colours any new partner
+
+visible_ids = {i["id"] for wp in wps.values() for i in wp["items"]}
+crit_ids, crit_links = set(), []
+for path in critical_paths:
+    vis = [i for i in path if i in visible_ids]       # a filter may hide some steps
+    crit_ids.update(vis)
+    crit_links.extend(zip(vis, vis[1:]))
+crit_links = list(dict.fromkeys(crit_links))
 
 for wp in wps.values():
     wp["items"].sort(key=lambda i: (i["start"], i["due"], i["id"]))
@@ -233,7 +319,7 @@ n_rows = len(rows)
 CHART_W = LABEL_W + n_months * PX_PER_MONTH
 body_h = sum(r["h"] for r in rows)
 LEGEND_H = 70
-W = CHART_W + 110
+W = max(CHART_W + 110, 940)
 H = HEADER_H + body_h + LEGEND_H + 10
 
 
@@ -246,6 +332,9 @@ add = svg.append
 add(f'<svg xmlns="http://www.w3.org/2000/svg" width="{W:.0f}" height="{H:.0f}" '
     f'viewBox="0 0 {W:.0f} {H:.0f}" font-family="{FONT}">')
 add(f'<rect width="{W:.0f}" height="{H:.0f}" fill="white"/>')
+if crit_links:
+    add(f'<defs><marker id="crit" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" '
+        f'orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="{CRITICAL_COLOUR}"/></marker></defs>')
 body_top, body_bot = HEADER_H, HEADER_H + body_h
 
 # Time header + vertical grid
@@ -265,6 +354,8 @@ for k in range(n_months):
     m = date(m.year + (m.month == 12), m.month % 12 + 1, 1)
 
 # Rows
+late = []          # lead labels, drawn after the connectors so lines pass behind them
+geom = {}          # id -> (x_left, x_right, y_centre, half_height) of each drawn bar / diamond
 y = HEADER_H
 zebra = 0
 for r in rows:
@@ -300,10 +391,14 @@ for r in rows:
         if zebra % 2:
             add(f'<rect x="0" y="{y}" width="{CHART_W}" height="{h}" fill="#f9fafb"/>')
         zebra += 1
+        crit = it["id"] in crit_ids
+        if crit:
+            add(f'<rect x="0" y="{y}" width="{CHART_W}" height="{h}" fill="{tint(CRITICAL_COLOUR, 0.92)}"/>')
 
         tx = 14 + indent
         top = y + (h - len(lines) * LINE_H) / 2 + LINE_H - 3
-        add(f'<text x="{tx}" y="{top:.1f}" font-size="11" font-weight="bold" fill="#111827">{escape(it["id"])}</text>')
+        add(f'<text x="{tx}" y="{top:.1f}" font-size="11" font-weight="bold" '
+            f'fill="{CRITICAL_COLOUR if crit else "#111827"}">{escape(it["id"])}</text>')
         for k, line in enumerate(lines):
             add(f'<text x="{tx + ID_W}" y="{top + k * LINE_H:.1f}" font-size="11" fill="#111827">{escape(line)}</text>')
 
@@ -316,6 +411,10 @@ for r in rows:
                 add(f'<polygon points="{pts}" fill="none" stroke="{ring}" stroke-width="7" stroke-linejoin="round"/>')
                 add(f'<polygon points="{pts}" fill="none" stroke="white" stroke-width="2.5" stroke-linejoin="round"/>')
             add(f'<polygon points="{pts}" fill="{MILESTONE_COLOUR}"/>')
+            if crit:
+                add(f'<polygon points="{pts}" fill="none" stroke="{CRITICAL_COLOUR}" stroke-width="2.5" '
+                    f'stroke-linejoin="round"/>')
+            geom[it["id"]] = (x - rr, x + rr, cy, rr)
             end_x = x + rr
         else:
             x1, x2 = x_of(it["start"]), x_of(it["due"])
@@ -337,12 +436,38 @@ for r in rows:
                 add(f'<rect {geom_} fill="none" stroke="{base}" stroke-width="1"/>')
             else:
                 add(f'<rect {geom_} fill="{full}" stroke="{base}" stroke-width="1"/>')
+            if crit:
+                add(f'<rect {geom_} fill="none" stroke="{CRITICAL_COLOUR}" stroke-width="2.5"/>')
+            geom[it["id"]] = (x1, x1 + w, cy, BAR_H / 2)
             end_x = x1 + w
 
         if SHOW_LEAD_TEXT:
-            add(f'<text x="{end_x + 10:.1f}" y="{cy + 4:.1f}" font-size="10" fill="#6b7280">'
-                f'{escape(", ".join(it["leads"]))}</text>')
+            halo = tint(CRITICAL_COLOUR, 0.92) if crit else ("#f9fafb" if zebra % 2 == 0 else "white")
+            lead_txt = escape(", ".join(it["leads"]))
+            pos = f'x="{end_x + 10:.1f}" y="{cy + 4:.1f}" font-size="10"'
+            box_w = 5.3 * len(", ".join(it["leads"])) + 6
+            late.append(f'<rect x="{end_x + 7:.1f}" y="{cy - 7:.1f}" width="{box_w:.1f}" height="14" '
+                        f'rx="3" fill="{halo}"/>')                         # masks any line behind
+            late.append(f'<text {pos} fill="#6b7280">{lead_txt}</text>')   # the label itself
     y += h
+
+# Critical-path connectors (finish -> start), drawn over the rows
+for a, b in crit_links:
+    xa1, xa2, cya, ha = geom[a]
+    xb1, xb2, cyb, hb = geom[b]
+    if xb1 - xa2 >= 10:                                   # room for a normal elbow
+        xm = (xa2 + xb1) / 2
+        pts = [(xa2, cya), (xm, cya), (xm, cyb), (xb1 - 3, cyb)]
+    else:                                                 # overlaps / touches: drop in vertically
+        lo, hi = max(xa1, xb1) + 3, min(xa2, xb2) - 3
+        xd = (lo + hi) / 2 if lo > hi else min(max(xa2 - 4, lo), hi)
+        down = cyb > cya
+        pts = [(xd, cya + (ha if down else -ha)), (xd, cyb - (hb + 3 if down else -(hb + 3)))]
+    d = " ".join(f"{px:.1f},{py:.1f}" for px, py in pts)
+    add(f'<polyline points="{d}" fill="none" stroke="{CRITICAL_COLOUR}" stroke-width="2" '
+        f'stroke-linejoin="round" marker-end="url(#crit)"/>')
+
+svg.extend(late)
 
 # Frame, today line
 add(f'<line x1="{LABEL_W}" y1="{HEADER_H - 16}" x2="{LABEL_W}" y2="{body_bot}" stroke="#6b7280" stroke-width="1.2"/>')
@@ -367,6 +492,12 @@ add(f'<text x="{lx + 24}" y="{ly}" font-size="11" fill="#111827">Several leads (
 lx += 24 + 7 * 30 + 20
 add(f'<polygon points="{lx + 8},{ly - 12} {lx + 16},{ly - 5} {lx + 8},{ly + 2} {lx},{ly - 5}" fill="{MILESTONE_COLOUR}"/>')
 add(f'<text x="{lx + 24}" y="{ly}" font-size="11" fill="#111827">Milestone</text>')
+if crit_links:
+    lx += 110
+    add(f'<rect x="{lx}" y="{ly - 12}" width="30" height="14" rx="3" fill="{tint(CRITICAL_COLOUR, 0.92)}"/>')
+    add(f'<line x1="{lx + 3}" y1="{ly - 5}" x2="{lx + 25}" y2="{ly - 5}" stroke="{CRITICAL_COLOUR}" '
+        f'stroke-width="2" marker-end="url(#crit)"/>')
+    add(f'<text x="{lx + 38}" y="{ly}" font-size="11" fill="#111827">Critical path</text>')
 
 if SHOW_STATUS_BORDER:
     lx, ly = 14, ly + 24

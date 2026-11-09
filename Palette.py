@@ -1,7 +1,8 @@
 """
 Shared colour handling for FlowDiagram_yaml.py and GANTT_yaml.py.
 
-Colours are in a small YAML file (default name: Colours.yaml).  Lookup order for the file:
+Colours live in a small YAML file (default name: Colours.yaml) so the scripts contain nothing
+specific to one project.  Lookup order for the file:
     1. --colours FILE on the command line
     2. Colours.yaml next to the project YAML
     3. Colours.yaml in the current folder
@@ -29,6 +30,7 @@ DEFAULT_STATUSES = {
     "Delayed": "#f97316", "Cancelled": "#dc2626",
 }
 DEFAULT_MILESTONE = "#111827"
+DEFAULT_CRITICAL = "#c026d3"
 DEFAULT_FALLBACK = {"node": "#999999", "cluster": "#eeeeee"}
 CLUSTER_TINT = 0.85      # cluster colour made from `node` when the file doesn't give one
 
@@ -71,6 +73,7 @@ class Palette:
         self.partners = {}                 # name -> {"node": ..., "cluster": ...}
         self.statuses = dict(DEFAULT_STATUSES)
         self.milestone = DEFAULT_MILESTONE
+        self.critical = DEFAULT_CRITICAL
         self.fallback = dict(DEFAULT_FALLBACK)
         self._noted = set()
 
@@ -104,6 +107,9 @@ class Palette:
 
         if cfg.get("milestone"):
             self.milestone = _hex(cfg["milestone"], "milestone", path)
+
+        if cfg.get("critical"):
+            self.critical = _hex(cfg["critical"], "critical", path)
 
         fb = cfg.get("fallback")
         if fb:
