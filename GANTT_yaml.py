@@ -373,9 +373,9 @@ if SHOW_STATUS_BORDER:
     add(f'<text x="{lx}" y="{ly}" font-size="11" font-weight="bold" fill="#111827">Status:</text>')
     lx += 50
     for st, col in STATUS_COLOURS.items():
+        dash = "" if col else 'stroke-dasharray="3,2"'
         add(f'<rect x="{lx}" y="{ly - 11}" width="22" height="12" rx="3" fill="#fff" '
-            f'stroke="{col or "#9ca3af"}" stroke-width="{3 if col else 1}" '
-            f'{"" if col else "stroke-dasharray=\'3,2\'"}/>')
+            f'stroke="{col or "#9ca3af"}" stroke-width="{3 if col else 1}" {dash}/>')
         label = st if col else "Not Started (none)"
         add(f'<text x="{lx + 30}" y="{ly}" font-size="11" fill="#111827">{label}</text>')
         lx += 30 + 7 * len(label) + 20
