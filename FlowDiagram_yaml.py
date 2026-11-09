@@ -376,8 +376,9 @@ while month_index(y_cursor) <= month_index(t_max) + 1:
             f'stroke="{"#9ca3af" if jan else "#d1d5db"}" stroke-width="{1 if jan else 0.6}" '
             f'stroke-dasharray="{"7,5" if jan else "2,5"}"/>')
     label = y_cursor.strftime("%b %Y") if (jan or y_cursor == first_month) else y_cursor.strftime("%b")
+    weight = 'font-weight="bold"' if jan else ""
     add(f'<text x="{AXIS_W - 16}" y="{gy + 4:.1f}" text-anchor="end" font-size="11" '
-        f'{"font-weight=\'bold\'" if jan else ""} fill="#374151">{label}</text>')
+        f'{weight} fill="#374151">{label}</text>')
     y_cursor = date(y_cursor.year + (y_cursor.month == 12), y_cursor.month % 12 + 1, 1)
 
 if SHOW_TODAY:
